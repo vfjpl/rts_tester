@@ -2,12 +2,13 @@
 #include <termios.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <string.h>
+#include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 
 
-#define DATA_NUM 32
+#define DATA_NUM 16
 #define WAIT_USEC 100000
 
 

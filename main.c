@@ -2,6 +2,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <fcntl.h>
+
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,23 @@
 
 #define DATA_NUM 16
 #define WAIT_USEC 100000
+
+
+static int open_serial(char** strs)
+{
+	int fd = open(*strs, O_RDWR | O_NOCTTY);
+	if(fd < 0)
+	{
+		return -1;
+	}
+	if(fcntl(fd, F_SETFD, FD_CLOEXEC) < 0)
+	{
+		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
 
 
 enum RTS_MODE
@@ -21,32 +39,24 @@ enum RTS_MODE
 	UNKNOWN
 };
 
-static enum RTS_MODE get_mode(const char* mode)
+static enum RTS_MODE get_mode(char** strs)
 {
-	if(strcmp(mode, "disabled") == 0) return DISABLED;
-	if(strcmp(mode, "software") == 0) return SOFTWARE;
-	if(strcmp(mode, "hardware") == 0) return HARDWARE;
-	return UNKNOWN;
+	enum RTS_MODE mode = DISABLED;
+	for(; *strs != NULL; ++strs)
+	{
+		if(!strcmp(*strs, "disabled")) mode = DISABLED;
+		if(!strcmp(*strs, "software")) mode = SOFTWARE;
+		if(!strcmp(*strs, "hardware")) mode = HARDWARE;
+	}
+	return mode;
 }
 
-static speed_t get_speed(const char* speed)
-{
-	if(strcmp(speed, "B0") == 0) return B0;
-	if(strcmp(speed, "B9600") == 0) return B9600;
-	if(strcmp(speed, "B19200") == 0) return B19200;
-	if(strcmp(speed, "B38400") == 0) return B38400;
-	if(strcmp(speed, "B57600") == 0) return B57600;
-	if(strcmp(speed, "B115200") == 0) return B115200;
-	if(strcmp(speed, "B230400") == 0) return B230400;
-	return 0;
-}
 
-static void set_termios(int fd, speed_t speed, bool hardware_rts)
+static void termios_makeraw(int fd, bool hardware_rts)
 {
 	struct termios options = {0};
 	tcgetattr(fd, &options);
 	cfmakeraw(&options);
-	cfsetspeed(&options, speed);
 
 	if(hardware_rts)
 		options.c_cflag |= CRTSCTS;
@@ -56,39 +66,35 @@ static void set_termios(int fd, speed_t speed, bool hardware_rts)
 	tcsetattr(fd, TCSANOW, &options);
 }
 
-static void set_RTS(int fd)
+
+static void setRTS(int fd)
 {
 	const int flags = TIOCM_RTS;
 	ioctl(fd, TIOCMBIS, &flags);
 }
 
-static void clear_RTS(int fd)
+static void clearRTS(int fd)
 {
 	const int flags = TIOCM_RTS;
 	ioctl(fd, TIOCMBIC, &flags);
 }
 
+
 int main(int argc, char** argv)
 {
 	int data[DATA_NUM];
 
-	if(argc < 4)
-	{
-		puts(argv[0]);
-		return EXIT_SUCCESS;
-	}
-
-	int fd = open(argv[1], O_RDWR | O_NOCTTY);
+	int fd = open_serial(argv + 1);
 	if(fd < 0)
 	{
 		perror(NULL);
 		return EXIT_FAILURE;
 	}
 
-	switch(get_mode(argv[3]))
+	switch(get_mode(argv + 2))
 	{
 	case DISABLED:
-		set_termios(fd, get_speed(argv[2]), false);
+		termios_makeraw(fd, false);
 		for(;;)
 		{
 			usleep(WAIT_USEC);
@@ -101,7 +107,7 @@ int main(int argc, char** argv)
 		}
 		break;
 	case SOFTWARE:
-		set_termios(fd, get_speed(argv[2]), false);
+		termios_makeraw(fd, false);
 		for(;;)
 		{
 			usleep(WAIT_USEC);
@@ -109,14 +115,14 @@ int main(int argc, char** argv)
 			for(size_t i = 0; i < DATA_NUM; ++i)
 				data[i] = rand();
 
-			set_RTS(fd);
+			setRTS(fd);
 			write(fd, &data, sizeof(data));
 			tcdrain(fd);
-			clear_RTS(fd);
+			clearRTS(fd);
 		}
 		break;
 	case HARDWARE:
-		set_termios(fd, get_speed(argv[2]), true);
+		termios_makeraw(fd, true);
 		for(;;)
 		{
 			usleep(WAIT_USEC);
